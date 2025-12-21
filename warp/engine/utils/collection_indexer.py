@@ -3,9 +3,9 @@ from warp.infra import Run, RunConfig
 from warp import Indexer
 
 
-def index(config: WARPRunConfig):
+def index(config: WARPRunConfig, embedding_path:str):
     with Run().context(
         RunConfig(nranks=config.nranks, experiment=config.experiment_name)
     ):
         indexer = Indexer(checkpoint="google/xtr-base-en", config=config.colbert())
-        indexer.index(name=config.index_name, collection=config.collection_path)
+        indexer.index(name=config.index_name, collection=config.collection_path, embedding_path=embedding_path)

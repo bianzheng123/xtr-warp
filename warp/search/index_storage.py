@@ -95,6 +95,7 @@ class IndexScorer(IndexLoader, CandidateGeneration):
                 pids = torch.tensor(pids, dtype=pids_.dtype, device=pids_.device)
             tracker.end("Candidate Generation")
 
+
             if filter_fn is not None:
                 filtered_pids = filter_fn(pids)
                 assert isinstance(filtered_pids, torch.Tensor), type(filtered_pids)

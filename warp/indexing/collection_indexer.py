@@ -28,9 +28,9 @@ from warp.utils.utils import print_message
 from warp.indexing.codecs.residual import ResidualCodec
 
 
-def encode(config, collection, shared_lists, shared_queues, verbose: int = 3):
+def encode(config, collection, shared_lists, shared_queues, embedding_path, verbose: int = 3):
     encoder = CollectionIndexer(config=config, collection=collection, verbose=verbose)
-    encoder.run(shared_lists)
+    encoder.run(shared_lists, embedding_path)
 
 
 class CollectionIndexer():
@@ -58,7 +58,7 @@ class CollectionIndexer():
 
         print_memory_stats(f'RANK:{self.rank}')
 
-    def run(self, shared_lists):
+    def run(self, shared_lists, embedding_path:str):
         with torch.inference_mode():
             self.setup() # Computes and saves plan for whole collection
             distributed.barrier(self.rank)
@@ -69,7 +69,7 @@ class CollectionIndexer():
             distributed.barrier(self.rank)
             print_memory_stats(f'RANK:{self.rank}')
 
-            self.index() # Encodes and saves all tokens into residuals
+            self.index(embedding_path) # Encodes and saves all tokens into residuals
             distributed.barrier(self.rank)
             print_memory_stats(f'RANK:{self.rank}')
 
@@ -343,7 +343,7 @@ class CollectionIndexer():
         # sample_reconstruct = get_centroids_for(centroids, sample)
         # sample_avg_residual = (sample - sample_reconstruct).mean(dim=0)
 
-    def index(self):
+    def index(self, embedding_path:str):
         '''
         Encode embeddings for all passages in collection.
         Each embedding is converted to code (centroid id) and residual.
@@ -362,7 +362,15 @@ class CollectionIndexer():
                         Run().print_main(f"#> Found chunk {chunk_idx} in the index already, skipping encoding...")
                     continue
                 # Encode passages into embeddings with the checkpoint model
-                embs, doclens = self.encoder.encode_passages(passages) 
+                embs, doclens = self.encoder.encode_passages(passages)
+
+                if embedding_path is not None:
+                    import numpy as np
+                    numpy_32 = embs.numpy().astype("float32")
+                    np.save(os.path.join(embedding_path, f"encoding{chunk_idx}_float32.npy"), numpy_32)
+                    np.save(os.path.join(embedding_path, f"doclens{chunk_idx}.npy"), doclens)
+                    print(f'save embeddings chunkID {chunk_idx}')
+
                 if self.use_gpu:
                     assert embs.dtype == torch.float32
                 else:

@@ -6,6 +6,12 @@ from warp.engine.config import WARPRunConfig
 from warp.engine.searcher import WARPSearcher
 from warp.engine.utils.collection_indexer import index
 from warp.engine.utils.index_converter import convert_index
+import performance_metric
+import getpass
+import json
+import time
+import numpy as np
+
 
 class CustomWARPRunConfig(WARPRunConfig):
     def __init__(self, collection, nbits: int = 4, k: int = 10):
@@ -25,83 +31,157 @@ class CustomWARPRunConfig(WARPRunConfig):
     def collection_path(self):
         return self.collection.path
 
-passages = [
-    "Bananas are berries, but strawberries aren't.",
-    "Octopuses have three hearts and blue blood.",
-    "A day on Venus is longer than a year on Venus.",
-    "There are more trees on Earth than stars in the Milky Way.",
-    "Water can boil and freeze at the same time, known as the triple point.",
-    "A shrimp's heart is located in its head.",
-    "Honey never spoils; archaeologists have found 3000-year-old edible honey.",
-    "Wombat poop is cube-shaped to prevent it from rolling away.",
-    "There's a species of jellyfish that is biologically immortal.",
-    "Humans share about 60% of their DNA with bananas.",
-    "The Eiffel Tower can grow taller in the summer due to heat expansion.",
-    "Some turtles can breathe through their butts.",
-    "The shortest war in history lasted 38 to 45 minutes (Anglo-Zanzibar War).",
-    "There's a gas cloud in space that smells like rum and tastes like raspberries.",
-    "Cows have best friends and get stressed when separated.",
-    "A group of flamingos is called a 'flamboyance'.",
-    "There's a species of fungus that can turn ants into zombies.",
-    "Sharks existed before trees.",
-    "Scotland has 421 words for 'snow'.",
-    "Hot water freezes faster than cold water, known as the Mpemba effect.",
-    "The inventor of the frisbee was turned into a frisbee after he died.",
-    "There's an island in Japan where bunnies outnumber people.",
-    "Sloths can hold their breath longer than dolphins.",
-    "You can hear a blue whale's heartbeat from over 2 miles away.",
-    "Butterflies can taste with their feet.",
-    "A day on Earth was once only 6 hours long in the distant past.",
-    "Vatican City has the highest crime rate per capita due to its tiny population.",
-    "There's an official Wizard of New Zealand, appointed by the government.",
-    "A bolt of lightning is five times hotter than the surface of the sun.",
-    "The letter 'E' is the most common letter in the English language.",
-    "There's a lake in Australia that stays bright pink regardless of conditions.",
-    "Cleopatra lived closer in time to the first moon landing than to the building of the Great Pyramid."
-]
 
 class CustomCollection:
-    def __init__(self, name: str, path: str, passages):
+    def __init__(self, name: str, path: str):
         self.name = name
         self.path = path
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as file:
-            file.writelines([f"{pid}\t{passage}\n" for pid, passage in enumerate(passages)])
 
-def construct_index(config: WARPRunConfig):
-    index(config)
+
+def construct_index(config: WARPRunConfig, embedding_path: str):
+    index(config, embedding_path=embedding_path)
     convert_index(os.path.join(config.index_root, config.index_name))
 
-def print_query(searcher: WARPSearcher, query: str):
+
+def save_answer(dataset: str, method_name: str,
+                build_index_suffix: str, retrieval_suffix: str,
+                topk: int):
+    answer_filename = os.path.expanduser(
+        f'~/Dataset/billion-scale-multi-vector-retrieval/xtr/Result/answer/{dataset}-{method_name}-top{topk}-{build_index_suffix}-{retrieval_suffix}.tsv')
+    with open(answer_filename, 'w') as f:
+        for query_id, pID, rank, score in result_l:
+            f.write(f'{query_id}\t{pID}\t{rank}\t{score}\n')
+
+def read_query_document(dataset:str):
+    query_filename = os.path.expanduser(
+        f'~/Dataset/billion-scale-multi-vector-retrieval/RawData/{dataset}/document/queries.dev.tsv')
+    qID_l = []
+    qtxt_l = []
+    with open(query_filename, 'r') as f:
+        for line in f:
+            if line == '':
+                continue
+            qID, text = line.split('\t')
+            qID_l.append(qID)
+            qtxt_l.append(text.strip())
+
+    pID_l = []
+    collection_filename = os.path.expanduser(
+        f'~/Dataset/billion-scale-multi-vector-retrieval/RawData/{dataset}/document/collection.tsv')
+    with open(collection_filename, 'r') as f:
+        for line in f:
+            if line == '':
+                continue
+            pID, text = line.split('\t')
+            pID_l.append(int(pID))
+    return qID_l, qtxt_l, pID_l
+
+
+def print_query(searcher: WARPSearcher, query: str, collection_filename: str):
+    passageID2text_m = {}
+    cnt = 0
+    with open(collection_filename, 'r') as f:
+        for line in f:
+            if line == '':
+                continue
+            pID, text = line.split('\t')
+            passageID2text_m[cnt] = text.strip()
+            cnt += 1
+    print(passageID2text_m)
     print(f"Query: {query}")
     passage_ids, _, scores = searcher.search(query, k=10)
+    print(passage_ids)
     for pid, score in zip(passage_ids, scores):
-        print(pid, passages[pid], score)
+        print(pid, passageID2text_m[int(pid)], score)
     print("====================")
 
+
 if __name__ == '__main__':
-    os.environ["INDEX_ROOT"] = os.path.expanduser("~/warp/indexes")
-    freeze_support()
-    torch.set_num_threads(1)
+    method_name = 'WARP'
+    build_index_suffix = ''
+    retrieval_suffix = ''
+    retrieval_config = {}
+    # for dataset in ['lotte', 'msmacro', 'dpr-nq', 'hotpotqa']:
+    for dataset in ['lotte-500-gnd']:
+        username = getpass.getuser()
+        topk = 10
+        index_path = os.path.expanduser(f'~/Dataset/billion-scale-multi-vector-retrieval/xtr/Index/{dataset}')
+        # os.makedirs(index_path, exist_ok=True)
+        os.environ["INDEX_ROOT"] = index_path
+        #
+        # embedding_path = os.path.expanduser(f'~/Dataset/billion-scale-multi-vector-retrieval/xtr/Embedding/{dataset}')
+        # os.makedirs(embedding_path, exist_ok=True)
 
-    # Define the collection (i.e., list of passages)
-    collection_path = os.path.expanduser("~/collections/my_list_of_facts.tsv")
-    collection = CustomCollection(
-        name="my_list_of_facts",
-        path=collection_path,
-        passages=passages
-    )
-    config = CustomWARPRunConfig(
-        nbits=4,
-        collection=collection,
-    )
+        freeze_support()
+        torch.set_num_threads(1)
 
-    # Construct an index over the provided collection.
-    construct_index(config)
+        # Define the collection (i.e., list of passages)
+        collection_filename = os.path.expanduser(
+            f'~/Dataset/billion-scale-multi-vector-retrieval/RawData/{dataset}/document/collection.tsv')
+        collection = CustomCollection(
+            name="warp",
+            path=collection_filename,
+        )
+        config = CustomWARPRunConfig(
+            nbits=4,
+            collection=collection,
+        )
 
-    # Prepare for searching via the constructed index.
-    searcher = WARPSearcher(config)
+        # Construct an index over the provided collection.
+        # construct_index(config, embedding_path=embedding_path)
 
-    # Handle "user" queries using the searcher.
-    print_query(searcher, "how do butterflies taste?")
-    print_query(searcher, "quickest war in history?")
+        # Prepare for searching via the constructed index.
+        searcher = WARPSearcher(config)
+
+        qID_l, qtxt_l, pID_l = read_query_document(dataset=dataset)
+        n_query = len(qtxt_l)
+
+        result_l = []
+        search_time_l = []
+        for query, query_id in zip(qtxt_l, qID_l):
+            start_time = time.time()
+            passage_ids, _, scores = searcher.search(query, k=topk)
+            search_time_l.append(time.time() - start_time)
+
+            for local_pID, rank_0, score in zip(passage_ids, range(len(passage_ids)), scores):
+                result_l.append((query_id, local_pID, rank_0 + 1, score))
+        search_time_m = {
+            'total_query_time_ms': '{:.3f}'.format(sum(search_time_l)),
+            "retrieval_time_p5(ms)": '{:.3f}'.format(np.percentile(search_time_l, 5)),
+            "retrieval_time_p50(ms)": '{:.3f}'.format(np.percentile(search_time_l, 50)),
+            "retrieval_time_p95(ms)": '{:.3f}'.format(np.percentile(search_time_l, 95)),
+            'average_query_time_ms': '{:.3f}'.format(1.0 * sum(search_time_l) / n_query),
+        }
+
+        save_answer(dataset=dataset, method_name=method_name,
+                    build_index_suffix=build_index_suffix, retrieval_suffix=retrieval_suffix,
+                    topk=topk)
+
+        mrr_gnd, success_gnd = performance_metric.load_groundtruth(username=username, dataset=dataset,
+                                                                   topk=topk)
+        mrr_l, success_l, search_accuracy_m = performance_metric.count_accuracy(
+            username=username, dataset=dataset, topk=topk,
+            method_name=method_name, build_index_suffix=build_index_suffix, retrieval_suffix=retrieval_suffix,
+            mrr_gnd=mrr_gnd, success_gnd=success_gnd)
+
+        retrieval_info_m = {
+            'n_query': len(qID_l), 'topk': topk, 'build_index': {},
+            'retrieval': retrieval_config,
+            'search_time': search_time_m, 'search_accuracy': search_accuracy_m
+        }
+
+        method_performance_name = f'{dataset}-retrieval-{method_name}-top{topk}-{build_index_suffix}-{retrieval_suffix}.json'
+        result_performance_path = f'/home/{username}/Dataset/billion-scale-multi-vector-retrieval/xtr/Result/performance'
+        performance_filename = os.path.join(result_performance_path, method_performance_name)
+        with open(performance_filename, "w") as f:
+            json.dump(retrieval_info_m, f)
+
+        # Handle "user" queries using the searcher.
+        query_filename = os.path.expanduser(
+            f'~/Dataset/billion-scale-multi-vector-retrieval/RawData/{dataset}/document/queries.dev.tsv')
+        with open(query_filename, 'r') as f:
+            for line in f:
+                if line == '':
+                    continue
+                pID, text = line.split('\t')
+                print_query(searcher, query=text, collection_filename=collection_filename)

@@ -57,7 +57,7 @@ class Indexer:
 
         return deleted
 
-    def index(self, name, collection, overwrite=False):
+    def index(self, name, collection, embedding_path:str, overwrite=False):
         assert overwrite in [True, False, 'reuse', 'resume', "force_silent_overwrite"]
 
         self.configure(collection=collection, index_name=name, resume=overwrite=='resume')
@@ -77,16 +77,16 @@ class Indexer:
             self.erase()
 
         if index_does_not_exist or overwrite != 'reuse':
-            self.__launch(collection)
+            self.__launch(collection, embedding_path)
 
         return self.index_path
 
-    def __launch(self, collection):
+    def __launch(self, collection, embedding_path:str):
         launcher = Launcher(encode)
         if self.config.nranks == 1 and self.config.avoid_fork_if_possible:
             shared_queues = []
             shared_lists = []
-            launcher.launch_without_fork(self.config, collection, shared_lists, shared_queues, self.verbose)
+            launcher.launch_without_fork(self.config, collection, shared_lists, shared_queues, embedding_path, self.verbose)
 
             return
 
@@ -95,4 +95,4 @@ class Indexer:
         shared_queues = [manager.Queue(maxsize=1) for _ in range(self.config.nranks)]
 
         # Encodes collection into index using the CollectionIndexer class
-        launcher.launch(self.config, collection, shared_lists, shared_queues, self.verbose)
+        launcher.launch(self.config, collection, shared_lists, shared_queues, embedding_path, self.verbose)
