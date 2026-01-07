@@ -101,16 +101,15 @@ if __name__ == '__main__':
     build_index_suffix = ''
     retrieval_suffix = ''
     retrieval_config = {}
-    # for dataset in ['lotte', 'msmacro', 'dpr-nq', 'hotpotqa']:
-    for dataset in ['lotte-500-gnd']:
+    for dataset in ['lotte', 'msmacro']:
+    # for dataset in ['lotte-500-gnd']:
         username = getpass.getuser()
-        topk = 10
         index_path = os.path.expanduser(f'~/Dataset/billion-scale-multi-vector-retrieval/xtr/Index/{dataset}')
-        # os.makedirs(index_path, exist_ok=True)
+        os.makedirs(index_path, exist_ok=True)
         os.environ["INDEX_ROOT"] = index_path
-        #
-        # embedding_path = os.path.expanduser(f'~/Dataset/billion-scale-multi-vector-retrieval/xtr/Embedding/{dataset}')
-        # os.makedirs(embedding_path, exist_ok=True)
+
+        embedding_path = os.path.expanduser(f'~/Dataset/billion-scale-multi-vector-retrieval/xtr/Embedding/{dataset}')
+        os.makedirs(embedding_path, exist_ok=True)
 
         freeze_support()
         torch.set_num_threads(1)
@@ -123,65 +122,66 @@ if __name__ == '__main__':
             path=collection_filename,
         )
         config = CustomWARPRunConfig(
-            nbits=4,
+            nbits=2,
             collection=collection,
         )
 
         # Construct an index over the provided collection.
         # construct_index(config, embedding_path=embedding_path)
 
-        # Prepare for searching via the constructed index.
-        searcher = WARPSearcher(config)
+        for topk in [10, 100]:
+            # Prepare for searching via the constructed index.
+            searcher = WARPSearcher(config)
 
-        qID_l, qtxt_l, pID_l = read_query_document(dataset=dataset)
-        n_query = len(qtxt_l)
+            qID_l, qtxt_l, pID_l = read_query_document(dataset=dataset)
+            n_query = len(qtxt_l)
 
-        result_l = []
-        search_time_l = []
-        for query, query_id in zip(qtxt_l, qID_l):
-            start_time = time.time()
-            passage_ids, _, scores = searcher.search(query, k=topk)
-            search_time_l.append(time.time() - start_time)
+            result_l = []
+            search_time_l = []
+            for query, query_id in zip(qtxt_l, qID_l):
+                start_time = time.time()
+                passage_ids, _, scores = searcher.search(query, k=topk)
+                search_time_l.append((time.time() - start_time) * 1e3)
 
-            for local_pID, rank_0, score in zip(passage_ids, range(len(passage_ids)), scores):
-                result_l.append((query_id, local_pID, rank_0 + 1, score))
-        search_time_m = {
-            'total_query_time_ms': '{:.3f}'.format(sum(search_time_l)),
-            "retrieval_time_p5(ms)": '{:.3f}'.format(np.percentile(search_time_l, 5)),
-            "retrieval_time_p50(ms)": '{:.3f}'.format(np.percentile(search_time_l, 50)),
-            "retrieval_time_p95(ms)": '{:.3f}'.format(np.percentile(search_time_l, 95)),
-            'average_query_time_ms': '{:.3f}'.format(1.0 * sum(search_time_l) / n_query),
-        }
+                for local_pID, rank_0, score in zip(passage_ids, range(len(passage_ids)), scores):
+                    result_l.append((query_id, local_pID, rank_0 + 1, score))
+            search_time_m = {
+                'total_query_time_ms': '{:.3f}'.format(sum(search_time_l)),
+                "retrieval_time_p5(ms)": '{:.3f}'.format(np.percentile(search_time_l, 5)),
+                "retrieval_time_p50(ms)": '{:.3f}'.format(np.percentile(search_time_l, 50)),
+                "retrieval_time_p95(ms)": '{:.3f}'.format(np.percentile(search_time_l, 95)),
+                'average_query_time_ms': '{:.3f}'.format(1.0 * sum(search_time_l) / n_query),
+            }
 
-        save_answer(dataset=dataset, method_name=method_name,
-                    build_index_suffix=build_index_suffix, retrieval_suffix=retrieval_suffix,
-                    topk=topk)
+            save_answer(dataset=dataset, method_name=method_name,
+                        build_index_suffix=build_index_suffix, retrieval_suffix=retrieval_suffix,
+                        topk=topk)
 
-        mrr_gnd, success_gnd = performance_metric.load_groundtruth(username=username, dataset=dataset,
-                                                                   topk=topk)
-        mrr_l, success_l, search_accuracy_m = performance_metric.count_accuracy(
-            username=username, dataset=dataset, topk=topk,
-            method_name=method_name, build_index_suffix=build_index_suffix, retrieval_suffix=retrieval_suffix,
-            mrr_gnd=mrr_gnd, success_gnd=success_gnd)
+            mrr_gnd, success_gnd = performance_metric.load_groundtruth(username=username, dataset=dataset,
+                                                                       topk=topk)
+            mrr_l, success_l, search_accuracy_m = performance_metric.count_accuracy(
+                username=username, dataset=dataset, topk=topk,
+                method_name=method_name, build_index_suffix=build_index_suffix, retrieval_suffix=retrieval_suffix,
+                mrr_gnd=mrr_gnd, success_gnd=success_gnd)
 
-        retrieval_info_m = {
-            'n_query': len(qID_l), 'topk': topk, 'build_index': {},
-            'retrieval': retrieval_config,
-            'search_time': search_time_m, 'search_accuracy': search_accuracy_m
-        }
+            retrieval_info_m = {
+                'n_query': len(qID_l), 'topk': topk, 'build_index': {},
+                'retrieval': retrieval_config,
+                'search_time': search_time_m, 'search_accuracy': search_accuracy_m
+            }
 
-        method_performance_name = f'{dataset}-retrieval-{method_name}-top{topk}-{build_index_suffix}-{retrieval_suffix}.json'
-        result_performance_path = f'/home/{username}/Dataset/billion-scale-multi-vector-retrieval/xtr/Result/performance'
-        performance_filename = os.path.join(result_performance_path, method_performance_name)
-        with open(performance_filename, "w") as f:
-            json.dump(retrieval_info_m, f)
+            method_performance_name = f'{dataset}-retrieval-{method_name}-top{topk}-{build_index_suffix}-{retrieval_suffix}.json'
+            result_performance_path = f'/home/{username}/Dataset/billion-scale-multi-vector-retrieval/xtr/Result/performance'
+            performance_filename = os.path.join(result_performance_path, method_performance_name)
+            with open(performance_filename, "w") as f:
+                json.dump(retrieval_info_m, f)
 
-        # Handle "user" queries using the searcher.
-        query_filename = os.path.expanduser(
-            f'~/Dataset/billion-scale-multi-vector-retrieval/RawData/{dataset}/document/queries.dev.tsv')
-        with open(query_filename, 'r') as f:
-            for line in f:
-                if line == '':
-                    continue
-                pID, text = line.split('\t')
-                print_query(searcher, query=text, collection_filename=collection_filename)
+            # Handle "user" queries using the searcher.
+            query_filename = os.path.expanduser(
+                f'~/Dataset/billion-scale-multi-vector-retrieval/RawData/{dataset}/document/queries.dev.tsv')
+            # with open(query_filename, 'r') as f:
+            #     for line in f:
+            #         if line == '':
+            #             continue
+            #         pID, text = line.split('\t')
+            #         print_query(searcher, query=text, collection_filename=collection_filename)
