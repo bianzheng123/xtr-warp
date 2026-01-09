@@ -14,10 +14,11 @@ import numpy as np
 
 
 class CustomWARPRunConfig(WARPRunConfig):
-    def __init__(self, collection, nbits: int = 4, k: int = 10):
+    def __init__(self, collection, nbits: int = 4, k: int = 10, nprobe: int = 16):
         self.collection = collection
         self.nbits = nbits
         self.k = k
+        self.nprobe = nprobe
 
     @property
     def experiment_name(self):
@@ -52,7 +53,8 @@ def save_answer(dataset: str, method_name: str,
         for query_id, pID, rank, score in result_l:
             f.write(f'{query_id}\t{pID}\t{rank}\t{score}\n')
 
-def read_query_document(dataset:str):
+
+def read_query_document(dataset: str):
     query_filename = os.path.expanduser(
         f'~/Dataset/billion-scale-multi-vector-retrieval/RawData/{dataset}/document/queries.dev.tsv')
     qID_l = []
@@ -101,8 +103,8 @@ if __name__ == '__main__':
     build_index_suffix = ''
     retrieval_suffix = ''
     retrieval_config = {}
-    for dataset in ['lotte', 'msmacro']:
-    # for dataset in ['lotte-500-gnd']:
+    # for dataset in ['lotte', 'msmacro']:
+    for dataset in ['lotte-500-gnd']:
         username = getpass.getuser()
         index_path = os.path.expanduser(f'~/Dataset/billion-scale-multi-vector-retrieval/xtr/Index/{dataset}')
         os.makedirs(index_path, exist_ok=True)
@@ -175,13 +177,3 @@ if __name__ == '__main__':
             performance_filename = os.path.join(result_performance_path, method_performance_name)
             with open(performance_filename, "w") as f:
                 json.dump(retrieval_info_m, f)
-
-            # Handle "user" queries using the searcher.
-            query_filename = os.path.expanduser(
-                f'~/Dataset/billion-scale-multi-vector-retrieval/RawData/{dataset}/document/queries.dev.tsv')
-            # with open(query_filename, 'r') as f:
-            #     for line in f:
-            #         if line == '':
-            #             continue
-            #         pID, text = line.split('\t')
-            #         print_query(searcher, query=text, collection_filename=collection_filename)

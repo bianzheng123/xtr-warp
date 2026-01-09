@@ -19,8 +19,9 @@ class XTRTokenizer:
                                    truncation=True, max_length=length)
         input_ids = tokenized["input_ids"]
         attention_mask = tokenized["attention_mask"]
-        
+
         return input_ids, attention_mask
+
 
 # Source: https://huggingface.co/google/xtr-base-en/resolve/main/2_Dense/config.json
 # Activation function is torch.nn.modules.linear.Identity
@@ -28,9 +29,10 @@ class XTRLinear(torch.nn.Module):
     def __init__(self, in_features=768, out_features=128, bias=False):
         super().__init__()
         self.linear = torch.nn.Linear(in_features, out_features, bias=False)
-    
+
     def forward(self, x):
         return self.linear(x)
+
 
 class XTR(torch.nn.Module):
     def __init__(self, tokenizer, encoder):
@@ -51,18 +53,42 @@ class XTR(torch.nn.Module):
         Q = torch.nn.functional.normalize(Q, dim=2)
         return Q
 
+
+# def build_xtr_model():
+#     # NOTE Warning about unitialized decoder weights is to be expected.
+#     #      We only make use of the encoder anyways.
+#     logging.set_verbosity_error()
+#     import os
+#     index_path = os.path.expanduser(f'~/Dataset/billion-scale-multi-vector-retrieval/xtr/google-xtr-base-en')
+#     # model = AutoModel.from_pretrained("google/xtr-base-en", use_safetensors=True)
+#     model = AutoModel.from_pretrained(index_path, use_safetensors=True)
+#
+#     # tokenizer = XTRTokenizer(AutoTokenizer.from_pretrained("google/xtr-base-en"))
+#     tokenizer = XTRTokenizer(AutoTokenizer.from_pretrained(index_path))
+#     xtr = XTR(tokenizer, model.encoder)
+#
+#     # Source: https://huggingface.co/google/xtr-base-en/
+#     to_dense_path = hf_hub_download(repo_id="google/xtr-base-en", filename="2_Dense/pytorch_model.bin")
+#     xtr.linear.load_state_dict(torch.load(to_dense_path))
+#
+#     logging.set_verbosity_warning()
+#     return xtr
+
 def build_xtr_model():
     # NOTE Warning about unitialized decoder weights is to be expected.
     #      We only make use of the encoder anyways.
     logging.set_verbosity_error()
-    model = AutoModel.from_pretrained("google/xtr-base-en", use_safetensors=True)
+    import os
+    index_path = os.path.expanduser(f'~/Dataset/billion-scale-multi-vector-retrieval/xtr/google-xtr-base-en')
+    model = AutoModel.from_pretrained(index_path, use_safetensors=True)
 
-    tokenizer = XTRTokenizer(AutoTokenizer.from_pretrained("google/xtr-base-en"))
+    tokenizer = XTRTokenizer(AutoTokenizer.from_pretrained(index_path))
     xtr = XTR(tokenizer, model.encoder)
 
     # Source: https://huggingface.co/google/xtr-base-en/
-    to_dense_path = hf_hub_download(repo_id="google/xtr-base-en", filename="2_Dense/pytorch_model.bin")
-    xtr.linear.load_state_dict(torch.load(to_dense_path))
+    # to_dense_path = hf_hub_download(repo_id="google/xtr-base-en", filename="2_Dense/pytorch_model.bin")
+    # xtr.linear.load_state_dict(torch.load(to_dense_path))
+    xtr.linear.load_state_dict(torch.load(os.path.join(index_path, '2_Dense/pytorch_model.bin')))
 
     logging.set_verbosity_warning()
     return xtr
@@ -83,20 +109,20 @@ class XTRCheckpoint:
         assert bsize is not None
 
         input_ids, attention_mask = self.xtr.tokenizer(docs, self.config.doc_maxlen)
-        
+
         text_batches = self._split_into_batches(input_ids, attention_mask, bsize)
         total_length = sum([torch.sum(attention_mask) for _, attention_mask in text_batches])
 
         batch_lengths = [torch.sum(attention_mask, dim=1) for _, attention_mask in text_batches]
         batches = [self.xtr(input_ids.to(DEVICE), attention_mask.to(DEVICE))
                    for input_ids, attention_mask in text_batches]
-    
+
         flatten_embeddings = torch.zeros((total_length, TOKEN_EMBED_DIM), dtype=torch.float32)
 
         num_tokens = 0
         for batch_embeds, batch_length in zip(batches, batch_lengths):
             for _, (embeddings, length) in enumerate(zip(batch_embeds, batch_length)):
-                flatten_embeddings[num_tokens:num_tokens+length] = embeddings[:int(length)].detach()
+                flatten_embeddings[num_tokens:num_tokens + length] = embeddings[:int(length)].detach()
                 num_tokens += int(length)
 
         assert num_tokens == flatten_embeddings.shape[0]
@@ -105,10 +131,10 @@ class XTRCheckpoint:
     def _split_into_batches(self, ids, mask, bsize):
         batches = []
         for offset in range(0, ids.size(0), bsize):
-            batches.append((ids[offset:offset+bsize], mask[offset:offset+bsize]))
-    
+            batches.append((ids[offset:offset + bsize], mask[offset:offset + bsize]))
+
         return batches
-    
+
     def cuda(self):
         self.xtr = self.xtr.cuda()
         return self
@@ -130,7 +156,7 @@ class XTRCheckpoint:
                     self.xtr(input_ids.to(self.xtr.device), attention_mask.to(self.xtr.device)).cpu()
                     for input_ids, attention_mask in batches
                 ])
-        
+
         with torch.no_grad():
             encodings = self.xtr(input_ids.to(self.xtr.device), attention_mask.to(self.xtr.device))
 
@@ -143,4 +169,5 @@ class XTRCheckpoint:
     def query_tokenizer(self):
         class XTRQueryTokenizerPlaceholder:
             query_maxlen: int
+
         return XTRQueryTokenizerPlaceholder()

@@ -16,7 +16,7 @@ def build_xtr_model():
 
     logging.set_verbosity_warning()
 
-# build_xtr_model()
+build_xtr_model()
 
 
 import getpass

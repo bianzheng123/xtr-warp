@@ -16,15 +16,13 @@ from warp import Searcher
 class WARPSearcher:
     def __init__(self, config: WARPRunConfig):
         self.config = config
-        with Run().context(
-            RunConfig(nranks=config.nranks, experiment=config.experiment_name)
-        ):
-            self.searcher = Searcher(
-                index=config.index_name,
-                config=config,
-                index_root=config.index_root,
-                warp_engine=True,
-            )
+
+        self.searcher = Searcher(
+            index=config.index_name,
+            config=config,
+            index_root=config.index_root,
+            warp_engine=True,
+        )
 
         collection_map_path = os.path.join(
             os.path.dirname(config.collection_path), "collection_map.json"
