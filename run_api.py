@@ -11,6 +11,7 @@ import getpass
 import json
 import time
 import numpy as np
+import argparse
 
 
 class CustomWARPRunConfig(WARPRunConfig):
@@ -99,61 +100,77 @@ def print_query(searcher: WARPSearcher, query: str, collection_filename: str):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='argparse')
+    parser.add_argument('--n_thread', type=int, default=32)
+    parser.add_argument('--dataset', type=str, default='lotte-500-gnd')
+
+    args = parser.parse_args()
+    n_thread = args.n_thread
+    dataset = args.dataset
+    torch.set_num_threads(n_thread)
+
     method_name = 'WARP'
-    build_index_suffix = ''
-    retrieval_suffix = ''
-    retrieval_config = {}
-    # for dataset in ['lotte', 'msmacro']:
-    for dataset in ['lotte-500-gnd']:
-        username = getpass.getuser()
-        index_path = os.path.expanduser(f'~/Dataset/billion-scale-multi-vector-retrieval/xtr/Index/{dataset}')
-        os.makedirs(index_path, exist_ok=True)
-        os.environ["INDEX_ROOT"] = index_path
+    n_bit = 2
+    username = getpass.getuser()
+    index_path = os.path.expanduser(f'~/Dataset/billion-scale-multi-vector-retrieval/xtr/Index/{dataset}')
+    os.makedirs(index_path, exist_ok=True)
+    os.environ["INDEX_ROOT"] = index_path
 
-        embedding_path = os.path.expanduser(f'~/Dataset/billion-scale-multi-vector-retrieval/xtr/Embedding/{dataset}')
-        os.makedirs(embedding_path, exist_ok=True)
+    embedding_path = os.path.expanduser(f'~/Dataset/billion-scale-multi-vector-retrieval/xtr/Embedding/{dataset}')
+    os.makedirs(embedding_path, exist_ok=True)
 
-        freeze_support()
-        torch.set_num_threads(1)
+    freeze_support()
 
-        # Define the collection (i.e., list of passages)
-        collection_filename = os.path.expanduser(
-            f'~/Dataset/billion-scale-multi-vector-retrieval/RawData/{dataset}/document/collection.tsv')
-        collection = CustomCollection(
-            name="warp",
-            path=collection_filename,
-        )
-        config = CustomWARPRunConfig(
-            nbits=2,
-            collection=collection,
-        )
 
-        # Construct an index over the provided collection.
-        # construct_index(config, embedding_path=embedding_path)
+    # Define the collection (i.e., list of passages)
+    collection_filename = os.path.expanduser(
+        f'~/Dataset/billion-scale-multi-vector-retrieval/RawData/{dataset}/document/collection.tsv')
+    collection = CustomCollection(
+        name="warp",
+        path=collection_filename,
+    )
+    config = CustomWARPRunConfig(
+        nbits=n_bit,
+        collection=collection,
+    )
 
-        for topk in [10, 100]:
+    # Construct an index over the provided collection.
+    # construct_index(config, embedding_path=embedding_path)
+    searcher = WARPSearcher(config)
+
+    for topk in [10, 100]:
+        for nprobe in [1, 2, 4, 8, 16, 32, 64]:
+        # for nprobe in [ 64]:
             # Prepare for searching via the constructed index.
-            searcher = WARPSearcher(config)
+            searcher.set_nprobe(nprobe=nprobe)
 
             qID_l, qtxt_l, pID_l = read_query_document(dataset=dataset)
             n_query = len(qtxt_l)
 
             result_l = []
+            retrieval_time_l = []
+            encode_time_l = []
             search_time_l = []
             for query, query_id in zip(qtxt_l, qID_l):
                 start_time = time.time()
-                passage_ids, _, scores = searcher.search(query, k=topk)
-                search_time_l.append((time.time() - start_time) * 1e3)
+                encode_time, search_time, search_result = searcher.search(query, k=topk)
+                passage_ids, _, scores = search_result
+                retrieval_time_l.append((time.time() - start_time) * 1e3)
+                encode_time_l.append(encode_time)
+                search_time_l.append(search_time)
 
                 for local_pID, rank_0, score in zip(passage_ids, range(len(passage_ids)), scores):
                     result_l.append((query_id, local_pID, rank_0 + 1, score))
             search_time_m = {
-                'total_query_time_ms': '{:.3f}'.format(sum(search_time_l)),
-                "retrieval_time_p5(ms)": '{:.3f}'.format(np.percentile(search_time_l, 5)),
-                "retrieval_time_p50(ms)": '{:.3f}'.format(np.percentile(search_time_l, 50)),
-                "retrieval_time_p95(ms)": '{:.3f}'.format(np.percentile(search_time_l, 95)),
-                'average_query_time_ms': '{:.3f}'.format(1.0 * sum(search_time_l) / n_query),
+                'total_retrieval_time_ms': '{:.3f}'.format(sum(retrieval_time_l)),
+                'average_retrieval_time_ms': '{:.3f}'.format(1.0 * np.average(retrieval_time_l)),
+                'average_encode_time_ms': '{:.3f}'.format(1.0 * np.average(encode_time_l)),
+                'average_search_time_ms': '{:.3f}'.format(np.average(search_time_l)),
             }
+
+            build_index_suffix = f'n_bit_{n_bit}'
+            retrieval_suffix = f'nprobe_{nprobe}-n_thread_{n_thread}'
+            retrieval_config = {'nprobe': nprobe, 'n_thread': n_thread}
 
             save_answer(dataset=dataset, method_name=method_name,
                         build_index_suffix=build_index_suffix, retrieval_suffix=retrieval_suffix,
@@ -171,6 +188,7 @@ if __name__ == '__main__':
                 'retrieval': retrieval_config,
                 'search_time': search_time_m, 'search_accuracy': search_accuracy_m
             }
+            print(retrieval_info_m)
 
             method_performance_name = f'{dataset}-retrieval-{method_name}-top{topk}-{build_index_suffix}-{retrieval_suffix}.json'
             result_performance_path = f'/home/{username}/Dataset/billion-scale-multi-vector-retrieval/xtr/Result/performance'

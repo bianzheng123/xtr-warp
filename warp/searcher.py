@@ -3,6 +3,7 @@ import torch
 
 from tqdm import tqdm
 from typing import Union
+import time
 
 from warp.data import Collection, Queries, Ranking
 
@@ -74,15 +75,17 @@ class Searcher:
         self.warp_engine = warp_engine
         if warp_engine:
             if torch.get_num_threads() == 1:
+                print("torch.get_num_threads() == 1")
                 self.ranker = IndexScorerWARP(
                     self.index, self.config, False, load_index_with_mmap, t_prime=warp_config.t_prime, bound=warp_config.bound
                 )
             else:
+                print("torch.get_num_threads() != 1")
                 self.ranker = ParallelIndexScorerWARP(
                     self.index, self.config, use_gpu, load_index_with_mmap, t_prime=warp_config.t_prime, bound=warp_config.bound, fused_decompression_merge=warp_config.fused_ext
                 )
         else:
-            self.ranker = IndexScorer(self.index, use_gpu, load_index_with_mmap)
+            raise NotImplementedError("WARP engine is not supported yet")
 
         print_memory_stats()
 
@@ -109,10 +112,18 @@ class Searcher:
         pids=None,
         tracker=NOPTracker(),
     ):
+        start_time = time.time()
         tracker.begin("Query Encoding")
         Q = self.encode(text, full_length_search=full_length_search)
         tracker.end("Query Encoding")
-        return self.dense_search(Q, k, filter_fn=filter_fn, pids=pids, tracker=tracker)
+        end_time = time.time()
+        encode_time = (end_time - start_time) * 1e3
+
+        start_time = time.time()
+        res = self.dense_search(Q, k, filter_fn=filter_fn, pids=pids, tracker=tracker)
+        end_time = time.time()
+        search_time = (end_time - start_time) * 1e3
+        return encode_time, search_time, res
 
     def search_all(
         self,
@@ -192,8 +203,6 @@ class Searcher:
                 self.config, Q, k=k, filter_fn=filter_fn, pids=pids, tracker=tracker
             )
         else:
-            pids, scores = self.ranker.rank(
-                self.config, Q, filter_fn=filter_fn, pids=pids, tracker=tracker
-            )
+            raise NotImplementedError("WARP engine is not supported yet")
 
         return pids[:k], list(range(1, k + 1)), scores[:k]
